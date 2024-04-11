@@ -13,7 +13,7 @@ def rng_unif(key: Array, shape: tuple[int, int]) -> jnp.ndarray:
     return jax.random.uniform(key=key, shape=shape)
 
 def rng_normal(key: Array, shape: tuple[int, int]) -> jnp.ndarray:
-    return jax.random.normal(key=key, shape=shape) / shape[0]
+    return jax.random.normal(key=key, shape=shape)
 
 @jax.jit
 def mse(y_pred: jnp.ndarray, y_true: jnp.ndarray) -> jnp.ndarray:
