@@ -12,16 +12,21 @@ class LSTM:
         output_dim: int
     ) -> tuple[LSTMArchiParams, LSTMParams]:
         key = jax.random.PRNGKey(seed)
-        wf = rng_normal(key=key, shape=(hidden_dim, input_dim + hidden_dim))
-        bf = rng_normal(key=key, shape=(hidden_dim,1))
-        wi = rng_normal(key=key, shape=(hidden_dim, input_dim + hidden_dim))
-        bi = rng_normal(key=key, shape=(hidden_dim,1))
-        wc = rng_normal(key=key, shape=(hidden_dim, input_dim + hidden_dim))
-        bc = rng_normal(key=key, shape=(hidden_dim,1))
-        wo = rng_normal(key=key, shape=(hidden_dim, input_dim + hidden_dim))
-        bo = rng_normal(key=key, shape=(hidden_dim,1))
+        wf = rng_normal(key=key, shape=(hidden_dim, input_dim))
+        uf = rng_normal(key=key, shape=(hidden_dim, hidden_dim))
+        bf = rng_normal(key=key, shape=(hidden_dim, 1))
+        wi = rng_normal(key=key, shape=(hidden_dim, input_dim))
+        ui = rng_normal(key=key, shape=(hidden_dim, hidden_dim))
+        bi = rng_normal(key=key, shape=(hidden_dim, 1))
+        wc = rng_normal(key=key, shape=(hidden_dim, input_dim))
+        uc = rng_normal(key=key, shape=(hidden_dim, hidden_dim))
+        bc = rng_normal(key=key, shape=(hidden_dim, 1))
+        wo = rng_normal(key=key, shape=(hidden_dim, input_dim))
+        uo = rng_normal(key=key, shape=(hidden_dim, hidden_dim))
+        bo = rng_normal(key=key, shape=(hidden_dim, 1))
         wout = rng_normal(key=key, shape=(output_dim, hidden_dim))
-        return LSTMArchiParams(key, input_dim, hidden_dim, output_dim), LSTMParams(wf, bf, wi, bi, wc, bc, wo, bo, wout)
+        return LSTMArchiParams(key, input_dim, hidden_dim, output_dim), \
+            LSTMParams(wf, uf, bf, wi, ui, bi, wc, uc, bc, wo, uo, bo, wout)
 
     @staticmethod
     @jax.jit
@@ -30,7 +35,7 @@ class LSTM:
         x_cur: jnp.ndarray, 
         h_prev: jnp.ndarray
     ) -> jnp.ndarray:
-        return sigmoid((params.wf @ jnp.concatenate([h_prev, x_cur], axis=0)) + params.bf)
+        return sigmoid((params.uf @ h_prev) + (params.wf @ x_cur) + params.bf)
     
     @staticmethod
     @jax.jit
@@ -38,10 +43,17 @@ class LSTM:
         params: LSTMParams, 
         x_cur: jnp.ndarray, 
         h_prev: jnp.ndarray
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        i_t = sigmoid((params.wi @ jnp.concatenate([h_prev, x_cur], axis=0)) + params.bi)
-        c_t_hat = jnp.tanh((params.wc @ jnp.concatenate([h_prev, x_cur], axis=0)) + params.bc)
-        return i_t, c_t_hat
+    ) -> jnp.ndarray:
+        return sigmoid((params.ui @ h_prev) + (params.wi @ x_cur) + params.bi)
+
+    @staticmethod
+    @jax.jit
+    def c_cur_hat(
+        params: LSTMParams,
+        x_cur: jnp.ndarray,
+        h_prev: jnp.ndarray
+    ) -> jnp.ndarray:
+        return jnp.tanh((params.uc @ h_prev) + (params.wc @ x_cur) + params.bc)
 
     @staticmethod
     @jax.jit
@@ -51,8 +63,10 @@ class LSTM:
         h_prev: jnp.ndarray, 
         c_prev: jnp.ndarray
     ) -> jnp.ndarray:
-        i_t, c_t_hat = LSTM.i_cur(params, x_cur, h_prev)
-        return jnp.multiply(LSTM.f_cur(params, x_cur, h_prev), c_prev) + jnp.multiply(i_t, c_t_hat)
+        i_t = LSTM.i_cur(params, x_cur, h_prev)
+        c_t_hat = LSTM.c_cur_hat(params, x_cur, h_prev)
+        f_t = LSTM.f_cur(params, x_cur, h_prev)
+        return f_t * c_prev + i_t * c_t_hat
         
     
     @staticmethod
@@ -62,7 +76,7 @@ class LSTM:
         x_cur: jnp.ndarray, 
         h_prev: jnp.ndarray
     ) -> jnp.ndarray:
-        return sigmoid((params.wo @ jnp.concatenate([h_prev, x_cur], axis=0)) + params.bo)
+        return sigmoid(params.uo @ h_prev + params.wo @ x_cur + params.bo)
     
     @staticmethod
     @jax.jit
@@ -72,21 +86,19 @@ class LSTM:
         h_prev: jnp.ndarray, 
         c_prev: jnp.ndarray
     ) -> jnp.ndarray:
-        return jnp.multiply(LSTM.o_cur(params, x_cur, h_prev), 
-                       jnp.tanh(LSTM.c_cur(params, x_cur, h_prev, c_prev)))
+        o_t = LSTM.o_cur(params, x_cur, h_prev)
+        c_t = LSTM.c_cur(params, x_cur, h_prev, c_prev)
+        return o_t * jnp.tanh(c_t), c_t
         
     @staticmethod
-    @jax.jit
     def forward(
-        params: LSTMParams,
-        x_cur: jnp.ndarray, 
-        h_prev: jnp.ndarray, 
-        c_prev: jnp.ndarray,
-        wout: jnp.ndarray
+        tup: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray],
+        x_cur: jnp.ndarray
     ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        h_t = LSTM.h_cur(params, x_cur, h_prev, c_prev)
-        o_t = wout @ h_t
-        return (LSTM.c_cur(params, x_cur, h_prev, c_prev), o_t, h_t)
+        params, h_prev, c_prev = tup
+        h_t, c_t = LSTM.h_cur(params, x_cur, h_prev, c_prev)
+        out_t = params.wout @ h_t
+        return (params, h_t, c_t), out_t
 
     @staticmethod
     def forward_full(
@@ -94,20 +106,9 @@ class LSTM:
         params: LSTMParams, 
         x_in: jnp.ndarray
     ) -> jnp.ndarray:
-        time_steps = x_in.shape[1]
-        h, o, c = jnp.zeros(shape=(archi_params.hidden_dim, 1)), jnp.zeros(shape=(archi_params.output_dim, 1)), \
-            jnp.zeros(shape=(archi_params.hidden_dim, 1))
-        o_ls = []
-        for i in range(time_steps):
-            if len(x_in.shape) == 1:
-                c_t, o_t, h_t = LSTM.forward(params, x_in[i:i+1], h, c, params.wout)
-            elif len(x_in.shape) == 2:
-                c_t, o_t, h_t = LSTM.forward(params, x_in[:,i:i+1], h, c, params.wout)
-            elif len(x_in.shape) == 3:
-                c_t, o_t, h_t = LSTM.forward(params, x_in[:,i:i+1,:], h, c, params.wout) 
-            o_ls.append(o_t)
-            h, o, c = h_t, o_t, c_t
-        return jnp.array(o_ls)
+        h, c = jnp.zeros(shape=(archi_params.hidden_dim, 1)), jnp.zeros(shape=(archi_params.hidden_dim, 1))
+        (params, h, c), out_ls = jax.lax.scan(LSTM.forward, (params, h, c), x_in[0])
+        return out_ls
     
     @staticmethod
     def forward_batch(
@@ -124,9 +125,9 @@ class LSTM:
         params: LSTMParams,
         x_batch: jnp.ndarray,
         y_batch: jnp.ndarray
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+    ) -> jnp.ndarray:
         batch_out = LSTM.forward_batch(archi_params, params, x_batch)
-        return jnp.mean((batch_out - y_batch) ** 2) * 100
+        return jnp.mean((batch_out - y_batch) ** 2)
     
     @staticmethod
     def backward(
@@ -134,7 +135,7 @@ class LSTM:
         params: LSTMParams,
         x_batch: jnp.ndarray,
         y_batch: jnp.ndarray
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+    ) -> jnp.ndarray:
         mse_grad = jax.jacfwd(LSTM.mse, argnums=(1,))
         cur_grad = mse_grad(archi_params, params, x_batch, y_batch)
         return cur_grad
@@ -179,8 +180,7 @@ class PeepholeLSTM(LSTM):
         c_prev: jnp.ndarray, 
         c_t: jnp.ndarray
     ) -> jnp.ndarray:
-        return jnp.multiply(PeepholeLSTM.o_cur(params, x_cur, h_prev, c_t), 
-                       jnp.tanh(PeepholeLSTM.c_cur(params, x_cur, h_prev, c_prev))) 
+        return PeepholeLSTM.o_cur(params, x_cur, h_prev, c_t) * jnp.tanh(PeepholeLSTM.c_cur(params, x_cur, h_prev, c_prev))
 
     @staticmethod
     @jax.jit
