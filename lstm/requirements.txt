@@ -11,7 +11,7 @@ executing==2.0.1
 fonttools==4.51.0
 ipykernel==6.29.4
 ipython==8.23.0
-jax==0.4.6
+jax==0.4.26
 jaxlib==0.4.26
 jedi==0.19.1
 jupyter_client==8.6.1

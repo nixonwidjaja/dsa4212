@@ -48,10 +48,12 @@ optimiser = optax.chain(
 )
 
 archi_params, params = LSTM.init_params(seed=42, input_dim=1, hidden_dim=70, output_dim=1)
+with open("save_file_31.pkl", "rb") as f:
+    params = pickle.load(f)
 
 opt_state = optimiser.init(params)
 
-for epoch in range(num_epochs):
+for epoch in range(32, num_epochs):
     print(f"Epoch: {epoch + 1}")
     results = LSTM.forward_batch(archi_params, params, x_window)
     fig, ax = plt.subplots()
